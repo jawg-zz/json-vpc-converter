@@ -1,15 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
+# Git
+.git
+.gitignore
+.gitattributes
 
 # Environment
 .env
@@ -31,4 +23,9 @@ Thumbs.db
 .dockerignore
 
 # Project
+node_modules/
+__pycache__/
+*.py[cod]
+dist/
+build/
 *.log
