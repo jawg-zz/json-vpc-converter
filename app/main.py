@@ -373,7 +373,8 @@ function renderPreview(data) {
     <button class="btn btn-primary" id="convertBtn" onclick="convert()">
       ⬇ ${dir === 'json2vpc' ? 'Convert to VPC' : 'Extract to JSON'}
     </button>
-    <button class="btn btn-secondary" onclick="copySongList()">📋 Copy Song List</button>`;
+    <button class="btn btn-secondary" onclick="copySongList()">📋 Copy Song List</button>
+    <button class="btn btn-secondary" onclick="exportText()">📝 Export as Text</button>`;
 
   document.getElementById('previewSection').classList.add('visible');
 }
@@ -412,12 +413,22 @@ function showVerses(idx) {
   if (row) row.classList.add('active');
 
   const panel = document.getElementById('versePanel');
+  const verses = song.verses_text || [];
+  let vhtml = '';
+  if (verses.length) {
+    verses.forEach((v, vi) => {
+      let text = esc(v).replace(/`/g, ' ').replace(/_/g, ' ');
+      vhtml += `<div class="vitem"><span class="vtag">v${vi+1}</span>${text}</div>`;
+    });
+  } else {
+    vhtml = `<div class="vitem" style="color:var(--text-dim)">${song.verseCount || 0} verse${song.verseCount !== 1 ? 's' : ''}</div>`;
+  }
   panel.innerHTML = `
     <div class="vheader">
       <div class="vtitle">${esc(song.title || song.Text || 'Song')}</div>
       <button class="vclose" onclick="closeVerses()">✕</button>
     </div>
-    <div class="vitem" style="color:var(--text-dim)">${song.verseCount || 0} verse${song.verseCount !== 1 ? 's' : ''}</div>`;
+    ${vhtml}`;
   panel.classList.add('visible');
 }
 
@@ -434,6 +445,35 @@ function copySongList() {
     `${String(s.id || i + 1).padStart(3)}. ${s.title || s.Text || '(untitled)'} (${s.verseCount || 0} verses)`
   ).join('\n');
   navigator.clipboard.writeText(text).then(() => flash('📋 Song list copied'));
+}
+
+/* ── Export as Text ──────────────────────── */
+function exportText() {
+  if (!currentFile) return;
+  const fd = new FormData();
+  fd.append('file', currentFile);
+  const btn = document.querySelector('.btn-secondary:last-child');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner" style="border-top-color:var(--accent)"></span>';
+
+  fetch('/export/txt', { method: 'POST', body: fd })
+    .then(r => r.ok ? r.blob() : r.json().then(e => { throw new Error(e.detail); }))
+    .then(blob => {
+      const base = currentFile.name.replace(/\.(json|vpc)$/i, '');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = base + '.txt';
+      document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    })
+    .catch(err => {
+      flash(err.message, true);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    });
 }
 
 /* ── Convert ──────────────────────────────── */
@@ -508,10 +548,16 @@ async def preview_file(file: UploadFile = File(...)):
         verses = s.get("Verses", [])
         count = len(verses)
         total_verses += count
+        verse_texts = []
+        for v in verses:
+            vt = v.get("Text", "")
+            # Split on backtick-newline patterns for readable display
+            verse_texts.append(vt)
         song_list.append({
             "title": s.get("Text", s.get("Title", "")),
             "verseCount": count,
             "id": s.get("ID"),
+            "verses_text": verse_texts,
         })
 
     meta = {
@@ -596,6 +642,88 @@ async def convert_to_json(file: UploadFile = File(...)):
         headers={
             "Content-Disposition": f'attachment; filename="{base_name}.json"',
             "Content-Length": str(len(json_bytes)),
+        },
+    )
+
+
+@app.post("/export/txt")
+async def export_text(file: UploadFile = File(...)):
+    """Export song lyrics as formatted plain text."""
+    content = await file.read()
+    name = file.filename or ""
+    is_vpc = name.lower().endswith(".vpc")
+
+    try:
+        if is_vpc:
+            if not zipfile.is_zipfile(io.BytesIO(content)):
+                raise HTTPException(400, "Invalid VPC file (not a ZIP archive)")
+            with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
+                names = zf.namelist()
+                if not names:
+                    raise HTTPException(400, "VPC file is empty")
+                vpc_text = zf.read(names[0]).decode("utf-8")
+            data = vpc_to_json(vpc_text)
+        else:
+            data = json.loads(content)
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(400, f"Cannot parse file: {e}")
+
+    text_title = data.get("Text", data.get("Description", "Songbook"))
+    author = data.get("Author", "")
+    publisher = data.get("Publisher", "")
+    songs = data.get("Songs", [])
+
+    lines = []
+    sep = "=" * 60
+    sub = "-" * 60
+
+    lines.append(sep)
+    lines.append(f"  {text_title}".center(len(sep) - 4))
+    if author:
+        lines.append(f"  Author: {author}")
+    if publisher:
+        lines.append(f"  Publisher: {publisher}")
+    lines.append(sep)
+    lines.append("")
+    lines.append(f"Total: {len(songs)} songs")
+    lines.append("")
+
+    for i, s in enumerate(songs):
+        title = s.get("Text", s.get("Title", f"Song {i+1}"))
+        verses = s.get("Verses", [])
+        lines.append(sub)
+        lines.append(f"  {i+1}. {title} ({len(verses)} verses)")
+        lines.append(sub)
+        lines.append("")
+        for j, v in enumerate(verses):
+            text = v.get("Text", "")
+            # Remove backtick markers, clean spacing
+            cleaned = text.replace("`", " ").replace("_", " ").strip()
+            # Collapse multiple spaces
+            cleaned = " ".join(cleaned.split())
+            if cleaned:
+                lines.append(f"  {cleaned}")
+            lines.append("")
+        lines.append("")
+
+    text_content = "\n".join(lines)
+    base_name = name.rsplit(".", 1)[0] if "." in name else "songbook"
+    if base_name.endswith(".json"):
+        base_name = base_name[:-5]
+    if base_name.endswith(".vpc"):
+        base_name = base_name[:-4]
+
+    bytes_content = text_content.encode("utf-8")
+    return Response(
+        content=bytes_content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{base_name}.txt"',
+            "Content-Length": str(len(bytes_content)),
         },
     )
 
