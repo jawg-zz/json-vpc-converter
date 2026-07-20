@@ -155,6 +155,15 @@ PAGE = r"""<!DOCTYPE html>
   .song-table .empty { color: var(--text-dim); text-align: center; padding: 2rem; cursor: default; }
   .song-table .no-match { color: var(--text-dim); text-align: center; padding: 2rem; cursor: default; }
 
+  /* Pagination */
+  .pagination { display: flex; align-items: center; justify-content: center; gap: .35rem; padding: .75rem 0 .25rem; font-size: .82rem; }
+  .pagination .pbtn { background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); padding: .35rem .65rem; border-radius: 6px; cursor: pointer; font-family: var(--font); font-size: .8rem; transition: var(--transition); min-width: 2rem; text-align: center; }
+  .pagination .pbtn:hover { border-color: var(--accent); color: var(--text); }
+  .pagination .pbtn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+  .pagination .pbtn:disabled { opacity: .3; cursor: not-allowed; }
+  .pagination .pinfo { color: var(--text-dim); padding: 0 .5rem; font-size: .78rem; white-space: nowrap; }
+  .pagination .psep { color: var(--text-dim); }
+
   /* Verse detail panel */
   .verse-panel { display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; margin-top: .75rem; animation: fadeUp 0.3s ease; }
   .verse-panel.visible { display: block; }
@@ -246,6 +255,7 @@ PAGE = r"""<!DOCTYPE html>
         <tbody id="songBody"></tbody>
       </table>
     </div>
+    <div class="pagination" id="pagination"></div>
     <div class="verse-panel" id="versePanel"></div>
   </div>
   <div class="actions" id="actionRow"></div>
@@ -262,6 +272,9 @@ PAGE = r"""<!DOCTYPE html>
 let currentFile = null;
 let currentDirection = 'json2vpc';
 let previewData = null;
+let _filteredSongs = [];
+let _page = 1;
+let _perPage = 25;
 
 /* ── Direction toggle ─────────────────────── */
 document.querySelectorAll('#dirTabs button').forEach(btn => {
@@ -363,9 +376,11 @@ function renderPreview(data) {
   // Songs table
   const allSongs = data.songs || [];
   document.getElementById('songBadge').textContent = allSongs.length;
-  renderSongTable(allSongs);
   document.getElementById('songSearch').value = '';
   window._allSongs = allSongs;
+  _filteredSongs = allSongs;
+  _page = 1;
+  renderSongTable();
 
   // Action buttons
   const dir = currentDirection;
@@ -380,36 +395,71 @@ function renderPreview(data) {
 }
 
 /* ── Song table ───────────────────────────── */
-function renderSongTable(songs) {
+function renderSongTable() {
   const tbody = document.getElementById('songBody');
+  const songs = _filteredSongs;
   if (!songs.length) {
     tbody.innerHTML = `<tr><td colspan="3" class="no-match">No songs match your search</td></tr>`;
     return;
   }
-  tbody.innerHTML = songs.map((s, i) =>
-    `<tr data-idx="${i}" onclick="showVerses(${i})">
-      <td class="num">${s.id || i + 1}</td>
+  const totalPages = Math.ceil(songs.length / _perPage);
+  if (_page > totalPages) _page = totalPages;
+  const start = (_page - 1) * _perPage;
+  const page = songs.slice(start, start + _perPage);
+  tbody.innerHTML = page.map((s, i) => {
+    const globalIdx = start + i;
+    return `<tr data-gidx="${globalIdx}" onclick="showVerses(${globalIdx})">
+      <td class="num">${s.id || globalIdx + 1}</td>
       <td class="title">${esc(s.title || s.Text || '(untitled)')}</td>
       <td class="verses">${s.verseCount || s.verses || 0}</td>
-    </tr>`
-  ).join('');
+    </tr>`;
+  }).join('');
+  renderPagination(totalPages);
+}
+
+function renderPagination(totalPages) {
+  const el = document.getElementById('pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  let h = '';
+  // Prev
+  h += `<button class="pbtn" onclick="goPage(${_page - 1})" ${_page <= 1 ? 'disabled' : ''}>‹ Prev</button>`;
+  h += `<span class="pinfo">Page ${_page} of ${totalPages}</span>`;
+  // Page numbers (show max 7)
+  let start = Math.max(1, _page - 3);
+  let end = Math.min(totalPages, _page + 3);
+  if (start > 1) { h += `<button class="pbtn" onclick="goPage(1)">1</button>`; if (start > 2) h += `<span class="psep">…</span>`; }
+  for (let i = start; i <= end; i++) {
+    h += `<button class="pbtn ${i === _page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  if (end < totalPages) { if (end < totalPages - 1) h += `<span class="psep">…</span>`; h += `<button class="pbtn" onclick="goPage(${totalPages})">${totalPages}</button>`; }
+  // Next
+  h += `<button class="pbtn" onclick="goPage(${_page + 1})" ${_page >= totalPages ? 'disabled' : ''}>Next ›</button>`;
+  el.innerHTML = h;
+}
+
+function goPage(p) {
+  _page = p;
+  renderSongTable();
+  closeVerses();
 }
 
 function filterSongs() {
   const q = document.getElementById('songSearch').value.toLowerCase();
   const all = window._allSongs || [];
-  if (!q) { renderSongTable(all); return; }
-  const filtered = all.filter(s => (s.title || s.Text || '').toLowerCase().includes(q));
-  renderSongTable(filtered);
+  if (!q) { _filteredSongs = all; } else {
+    _filteredSongs = all.filter(s => (s.title || s.Text || '').toLowerCase().includes(q));
+  }
+  _page = 1;
+  renderSongTable();
 }
 
 /* ── Verse panel ──────────────────────────── */
-function showVerses(idx) {
+function showVerses(gidx) {
   const all = window._allSongs || [];
-  const song = all[idx];
+  const song = all[gidx];
   if (!song) return;
   document.querySelectorAll('#songBody tr').forEach(r => r.classList.remove('active'));
-  const row = document.querySelector(`#songBody tr[data-idx="${idx}"]`);
+  const row = document.querySelector(`#songBody tr[data-gidx="${gidx}"]`);
   if (row) row.classList.add('active');
 
   const panel = document.getElementById('versePanel');
