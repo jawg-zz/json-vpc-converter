@@ -8,7 +8,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import HTMLResponse, Response
 
 from json2vpc import json_to_vpc, vpc_to_json
@@ -164,6 +164,10 @@ PAGE = r"""<!DOCTYPE html>
   .pagination .pinfo { color: var(--text-dim); padding: 0 .5rem; font-size: .78rem; white-space: nowrap; }
   .pagination .psep { color: var(--text-dim); }
 
+  /* Selection */
+  .song-table input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+  .sel-count { color: var(--accent); font-size: .8rem; font-weight: 400; margin-left: auto; }
+
   /* Verse detail panel */
   .verse-panel { display: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; margin-top: .75rem; animation: fadeUp 0.3s ease; }
   .verse-panel.visible { display: block; }
@@ -251,7 +255,7 @@ PAGE = r"""<!DOCTYPE html>
     <input class="song-search" id="songSearch" type="text" placeholder="Search songs..." oninput="filterSongs()">
     <div class="song-scroll" id="songScroll">
       <table class="song-table">
-        <thead><tr><th>#</th><th>Title</th><th>Verses</th></tr></thead>
+        <thead><tr><th style="width:2rem"><input type="checkbox" id="selectAll" onchange="toggleAll()" title="Select all"></th><th>#</th><th>Title</th><th>Verses</th></tr></thead>
         <tbody id="songBody"></tbody>
       </table>
     </div>
@@ -275,6 +279,43 @@ let previewData = null;
 let _filteredSongs = [];
 let _page = 1;
 let _perPage = 25;
+let _selected = new Set();
+
+function toggleAll() {
+  const checked = document.getElementById('selectAll').checked;
+  const songs = _filteredSongs;
+  const start = (_page - 1) * _perPage;
+  const end = Math.min(start + _perPage, songs.length);
+  for (let i = start; i < end; i++) {
+    if (checked) _selected.add(i); else _selected.delete(i);
+  }
+  renderSongTable();
+  updateSelCount();
+}
+
+function toggleSel(gidx) {
+  if (_selected.has(gidx)) _selected.delete(gidx); else _selected.add(gidx);
+  updateSelCount();
+}
+
+function updateSelCount() {
+  const badge = document.getElementById('songBadge');
+  const total = window._allSongs ? window._allSongs.length : 0;
+  const sel = _selected.size;
+  if (sel > 0 && sel < total) badge.textContent = `${sel}/${total}`;
+  else if (sel === total) badge.textContent = `${total}`;
+  else badge.textContent = `${total}`;
+  // Update action button text
+  const btn = document.getElementById('convertBtn');
+  if (btn && sel > 0 && sel < total) {
+    const dir = currentDirection;
+    const action = dir === 'json2vpc' ? 'Convert to VPC' : 'Extract to JSON';
+    btn.innerHTML = `⬇ ${action} (${sel} selected)`;
+  } else if (btn) {
+    const dir = currentDirection;
+    btn.innerHTML = `⬇ ${dir === 'json2vpc' ? 'Convert to VPC' : 'Extract to JSON'}`;
+  }
+}
 
 /* ── Direction toggle ─────────────────────── */
 document.querySelectorAll('#dirTabs button').forEach(btn => {
@@ -380,7 +421,10 @@ function renderPreview(data) {
   window._allSongs = allSongs;
   _filteredSongs = allSongs;
   _page = 1;
+  // Select all by default
+  _selected = new Set(allSongs.map((_, i) => i));
   renderSongTable();
+  updateSelCount();
 
   // Action buttons
   const dir = currentDirection;
@@ -408,7 +452,9 @@ function renderSongTable() {
   const page = songs.slice(start, start + _perPage);
   tbody.innerHTML = page.map((s, i) => {
     const globalIdx = start + i;
+    const checked = _selected.has(globalIdx) ? 'checked' : '';
     return `<tr data-gidx="${globalIdx}" onclick="showVerses(${globalIdx})">
+      <td style="width:2rem;text-align:center"><input type="checkbox" ${checked} onclick="event.stopPropagation();toggleSel(${globalIdx})"></td>
       <td class="num">${s.id || globalIdx + 1}</td>
       <td class="title">${esc(s.title || s.Text || '(untitled)')}</td>
       <td class="verses">${s.verseCount || s.verses || 0}</td>
@@ -491,7 +537,10 @@ function closeVerses() {
 function copySongList() {
   const all = window._allSongs || [];
   if (!all.length) return;
-  const text = all.map((s, i) =>
+  const songs = _selected.size > 0 && _selected.size < all.length
+    ? all.filter((_, i) => _selected.has(i))
+    : all;
+  const text = songs.map((s, i) =>
     `${String(s.id || i + 1).padStart(3)}. ${s.title || s.Text || '(untitled)'} (${s.verseCount || 0} verses)`
   ).join('\n');
   navigator.clipboard.writeText(text).then(() => flash('📋 Song list copied'));
@@ -502,7 +551,11 @@ function exportText() {
   if (!currentFile) return;
   const fd = new FormData();
   fd.append('file', currentFile);
-  const btn = document.querySelector('.btn-secondary:last-child');
+  const all = window._allSongs || [];
+  if (_selected.size > 0 && _selected.size < all.length) {
+    fd.append('selected', Array.from(_selected).join(','));
+  }
+  const btn = document.querySelector('.btn-secondary:nth-child(3)');
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner" style="border-top-color:var(--accent)"></span>';
@@ -536,6 +589,10 @@ function convert() {
   const endpoint = currentDirection === 'json2vpc' ? '/convert' : '/reverse';
   const fd = new FormData();
   fd.append('file', currentFile);
+  const all = window._allSongs || [];
+  if (_selected.size > 0 && _selected.size < all.length) {
+    fd.append('selected', Array.from(_selected).join(','));
+  }
 
   fetch(endpoint, { method: 'POST', body: fd })
     .then(r => r.ok ? r.blob() : r.json().then(e => { throw new Error(e.detail || 'Conversion failed'); }))
@@ -628,7 +685,7 @@ async def preview_file(file: UploadFile = File(...)):
 
 
 @app.post("/convert")
-async def convert_to_vpc(file: UploadFile = File(...)):
+async def convert_to_vpc(file: UploadFile = File(...), selected: str = Form("")):
     if not file.filename or not file.filename.lower().endswith(".json"):
         raise HTTPException(400, "Please upload a .json file")
 
@@ -637,6 +694,13 @@ async def convert_to_vpc(file: UploadFile = File(...)):
         data = json.loads(content)
     except Exception as e:
         raise HTTPException(400, f"Invalid JSON: {e}")
+
+    # Apply selection filter
+    if selected:
+        indices = [int(i) for i in selected.split(",") if i.strip().isdigit()]
+        songs = data.get("Songs", [])
+        if indices:
+            data["Songs"] = [songs[i] for i in indices if 0 <= i < len(songs)]
 
     try:
         vpc_text = json_to_vpc(data)
@@ -660,7 +724,7 @@ async def convert_to_vpc(file: UploadFile = File(...)):
 
 
 @app.post("/reverse")
-async def convert_to_json(file: UploadFile = File(...)):
+async def convert_to_json(file: UploadFile = File(...), selected: str = Form("")):
     if not file.filename or not file.filename.lower().endswith(".vpc"):
         raise HTTPException(400, "Please upload a .vpc file")
 
@@ -683,6 +747,13 @@ async def convert_to_json(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"VPC parsing failed: {e}")
 
+    # Apply selection filter
+    if selected:
+        indices = [int(i) for i in selected.split(",") if i.strip().isdigit()]
+        songs = data.get("Songs", [])
+        if indices:
+            data["Songs"] = [songs[i] for i in indices if 0 <= i < len(songs)]
+
     json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
     base_name = file.filename.rsplit(".", 1)[0]
 
@@ -697,7 +768,7 @@ async def convert_to_json(file: UploadFile = File(...)):
 
 
 @app.post("/export/txt")
-async def export_text(file: UploadFile = File(...)):
+async def export_text(file: UploadFile = File(...), selected: str = Form("")):
     """Export song lyrics as formatted plain text."""
     content = await file.read()
     name = file.filename or ""
@@ -726,6 +797,12 @@ async def export_text(file: UploadFile = File(...)):
     author = data.get("Author", "")
     publisher = data.get("Publisher", "")
     songs = data.get("Songs", [])
+
+    # Apply selection filter
+    if selected:
+        indices = [int(i) for i in selected.split(",") if i.strip().isdigit()]
+        if indices:
+            songs = [songs[i] for i in indices if 0 <= i < len(songs)]
 
     lines = []
     sep = "=" * 60
