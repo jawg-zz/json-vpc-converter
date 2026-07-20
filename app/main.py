@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from json2vpc import json_to_vpc, vpc_to_json
 
-app = FastAPI(title="JSON ↔ VPC Converter", version="1.2.0")
+app = FastAPI(title="JSON ↔ VPC Converter", version="1.2.1")
 
 PAGE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -26,17 +26,17 @@ PAGE = r"""<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f0b09;
-    --bg-card: #1a1512;
-    --bg-card-hover: #231d19;
-    --border: #2d2621;
-    --border-hover: #4a3f37;
-    --text: #e8ddd4;
-    --text-muted: #8c7e72;
-    --text-dim: #5c5046;
-    --accent: #D4A853;
-    --accent-hover: #e0b96a;
-    --accent-glow: rgba(212, 168, 83, 0.08);
+    --bg: #0d0808;
+    --bg-card: #181010;
+    --bg-card-hover: #221717;
+    --border: #2e1c1c;
+    --border-hover: #4a2a2a;
+    --text: #e8d8d8;
+    --text-muted: #8c6e6e;
+    --text-dim: #5c3e3e;
+    --accent: #B8433A;
+    --accent-hover: #cc5850;
+    --accent-glow: rgba(184, 67, 58, 0.1);
     --radius: 12px;
     --radius-sm: 8px;
     --font: 'Outfit', system-ui, sans-serif;
@@ -74,7 +74,7 @@ PAGE = r"""<!DOCTYPE html>
     position: fixed;
     top: -30%; right: -20%;
     width: 700px; height: 700px;
-    background: radial-gradient(circle, rgba(212,168,83,0.06) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(184, 67, 58, 0.07) 0%, transparent 70%);
     z-index: 0;
     pointer-events: none;
   }
@@ -146,7 +146,7 @@ PAGE = r"""<!DOCTYPE html>
   .song-scroll::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
   .song-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
   .song-table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: .55rem .75rem; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; }
-  .song-table td { padding: .5rem .75rem; border-bottom: 1px solid rgba(45, 38, 33, 0.5); color: var(--text-muted); transition: var(--transition); cursor: pointer; }
+  .song-table td { padding: .5rem .75rem; border-bottom: 1px solid rgba(46, 28, 28, 0.5); color: var(--text-muted); transition: var(--transition); cursor: pointer; }
   .song-table tr:hover td { background: var(--bg-card-hover); color: var(--text); }
   .song-table tr.active td { background: var(--accent-glow); color: var(--accent); }
   .song-table .num { color: var(--text-dim); text-align: right; width: 2.5rem; font-size: .78rem; }
@@ -162,24 +162,22 @@ PAGE = r"""<!DOCTYPE html>
   .verse-panel .vheader { display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem; }
   .verse-panel .vclose { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 1.1rem; padding: .2rem; line-height: 1; transition: var(--transition); }
   .verse-panel .vclose:hover { color: var(--text); }
-  .verse-panel .vitem { padding: .5rem 0; border-bottom: 1px solid rgba(45, 38, 33, 0.3); font-size: .85rem; font-weight: 300; line-height: 1.5; color: var(--text); }
+  .verse-panel .vitem { padding: .5rem 0; border-bottom: 1px solid rgba(46, 28, 28, 0.3); font-size: .85rem; font-weight: 300; line-height: 1.5; color: var(--text); }
   .verse-panel .vitem:last-child { border-bottom: none; }
-  .verse-panel .vitem .vtag { font-size: .72rem; color: var(--text-dim); font-family: var(--font-mono); margin-right: .4rem; }
 
   /* Buttons */
   .actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.25rem; }
   .btn { padding: .7rem 1.5rem; border: none; border-radius: var(--radius-sm); font-family: var(--font); font-size: .88rem; font-weight: 500; cursor: pointer; transition: var(--transition); display: inline-flex; align-items: center; gap: .5rem; }
   .btn:active { transform: scale(0.97); }
-  .btn-primary { background: var(--accent); color: #0f0b09; }
-  .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 20px rgba(212, 168, 83, 0.2); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 20px rgba(184, 67, 58, 0.25); }
   .btn-primary:disabled { opacity: .4; cursor: wait; }
   .btn-secondary { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
   .btn-secondary:hover { background: var(--bg-card-hover); border-color: var(--border-hover); }
   .btn-secondary:disabled { opacity: .4; cursor: not-allowed; }
 
   /* Spinner */
-  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(15, 11, 9, 0.2); border-top-color: #0f0b09; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
-  .spinner-light { border-color: rgba(255,255,255,0.15); border-top-color: var(--accent); }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Footer */
@@ -187,12 +185,11 @@ PAGE = r"""<!DOCTYPE html>
   .footer a { color: var(--text-muted); text-decoration: none; }
   .footer a:hover { color: var(--accent); }
 
-  /* Empty state for drop zone */
+  /* File info in drop zone */
   .drop-zone .file-info { display: none; }
   .drop-zone.has-file .drop-prompt { display: none; }
   .drop-zone.has-file .file-info { display: block; }
   .drop-zone.has-file .file-info .fname { font-weight: 500; color: var(--accent); }
-  .drop-zone.has-file .file-info .fsize { color: var(--text-dim); font-size: .8rem; }
 
   /* Responsive */
   @media (max-width: 600px) {
@@ -265,7 +262,6 @@ PAGE = r"""<!DOCTYPE html>
 let currentFile = null;
 let currentDirection = 'json2vpc';
 let previewData = null;
-let allSongs = [];
 
 /* ── Direction toggle ─────────────────────── */
 document.querySelectorAll('#dirTabs button').forEach(btn => {
@@ -327,7 +323,6 @@ function clearPreview() {
   document.getElementById('versePanel').classList.remove('visible');
   document.getElementById('actionRow').innerHTML = '';
   previewData = null;
-  allSongs = [];
 }
 
 /* ── Preview ──────────────────────────────── */
@@ -363,13 +358,14 @@ function renderPreview(data) {
     <div class="stat"><div class="num">${sCount}</div><div class="lbl">Songs</div></div>
     <div class="stat"><div class="num">${totalV}</div><div class="lbl">Verses</div></div>
     <div class="stat"><div class="num">${Math.round(totalV / Math.max(sCount, 1) * 10) / 10}</div><div class="lbl">Avg Verses</div></div>
-    <div class="stat"><div class="num">${data.originalSize || '—'}</div><div class="lbl">Size (KB)</div></div>`;
+    <div class="stat"><div class="num">${data.originalSize || '—'}</div><div class="lbl">File (KB)</div></div>`;
 
   // Songs table
-  allSongs = data.songs || [];
+  const allSongs = data.songs || [];
   document.getElementById('songBadge').textContent = allSongs.length;
   renderSongTable(allSongs);
   document.getElementById('songSearch').value = '';
+  window._allSongs = allSongs;
 
   // Action buttons
   const dir = currentDirection;
@@ -393,52 +389,35 @@ function renderSongTable(songs) {
     `<tr data-idx="${i}" onclick="showVerses(${i})">
       <td class="num">${s.id || i + 1}</td>
       <td class="title">${esc(s.title || s.Text || '(untitled)')}</td>
-      <td class="verses">${s.verses || s.verseCount || 0}</td>
+      <td class="verses">${s.verseCount || s.verses || 0}</td>
     </tr>`
   ).join('');
 }
 
 function filterSongs() {
   const q = document.getElementById('songSearch').value.toLowerCase();
-  if (!previewData) return;
-  const filtered = (previewData.songs || []).filter(s =>
-    (s.title || s.Text || '').toLowerCase().includes(q)
-  );
+  const all = window._allSongs || [];
+  if (!q) { renderSongTable(all); return; }
+  const filtered = all.filter(s => (s.title || s.Text || '').toLowerCase().includes(q));
   renderSongTable(filtered);
 }
 
 /* ── Verse panel ──────────────────────────── */
 function showVerses(idx) {
-  const song = allSongs[idx];
+  const all = window._allSongs || [];
+  const song = all[idx];
   if (!song) return;
-  // highlight row
   document.querySelectorAll('#songBody tr').forEach(r => r.classList.remove('active'));
   const row = document.querySelector(`#songBody tr[data-idx="${idx}"]`);
   if (row) row.classList.add('active');
 
   const panel = document.getElementById('versePanel');
-  // If we have full verse data from preview, show it
-  if (song.verses && Array.isArray(song.verses)) {
-    // We stored verseData during preview? No, the preview API returns counts, not text.
-    // Re-fetch the full file to get verse text — or for now show the count
-    panel.innerHTML = `
-      <div class="vheader">
-        <div class="vtitle">${esc(song.title || song.Text || 'Song')}</div>
-        <button class="vclose" onclick="closeVerses()">✕</button>
-      </div>
-      ${(song.verses_text || []).map((v, i) =>
-        `<div class="vitem">${esc(v.Text || '')}</div>`
-      ).join('') || `<div class="vitem" style="color:var(--text-dim)">${song.verseCount || 0} verse${song.verseCount !== 1 ? 's' : ''}</div>`}
-    `;
-  } else {
-    panel.innerHTML = `
-      <div class="vheader">
-        <div class="vtitle">${esc(song.title || song.Text || 'Song')}</div>
-        <button class="vclose" onclick="closeVerses()">✕</button>
-      </div>
-      <div class="vitem" style="color:var(--text-dim)">${song.verseCount || 0} verse${song.verseCount !== 1 ? 's' : ''}</div>
-    `;
-  }
+  panel.innerHTML = `
+    <div class="vheader">
+      <div class="vtitle">${esc(song.title || song.Text || 'Song')}</div>
+      <button class="vclose" onclick="closeVerses()">✕</button>
+    </div>
+    <div class="vitem" style="color:var(--text-dim)">${song.verseCount || 0} verse${song.verseCount !== 1 ? 's' : ''}</div>`;
   panel.classList.add('visible');
 }
 
@@ -449,19 +428,12 @@ function closeVerses() {
 
 /* ── Copy song list ───────────────────────── */
 function copySongList() {
-  if (!previewData || !previewData.songs) return;
-  const lines = previewData.songs.map((s, i) =>
+  const all = window._allSongs || [];
+  if (!all.length) return;
+  const text = all.map((s, i) =>
     `${String(s.id || i + 1).padStart(3)}. ${s.title || s.Text || '(untitled)'} (${s.verseCount || 0} verses)`
-  );
-  const text = lines.join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    flash('📋 Song list copied to clipboard');
-  }).catch(() => {
-    // Fallback
-    const ta = document.createElement('textarea');
-    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
-    flash('📋 Song list copied to clipboard');
-  });
+  ).join('\n');
+  navigator.clipboard.writeText(text).then(() => flash('📋 Song list copied'));
 }
 
 /* ── Convert ──────────────────────────────── */
@@ -469,7 +441,7 @@ function convert() {
   if (!currentFile) return;
   const btn = document.getElementById('convertBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner spinner-light"></span> Converting…';
+  btn.innerHTML = '<span class="spinner"></span> Converting…';
 
   const endpoint = currentDirection === 'json2vpc' ? '/convert' : '/reverse';
   const fd = new FormData();
@@ -539,7 +511,6 @@ async def preview_file(file: UploadFile = File(...)):
         song_list.append({
             "title": s.get("Text", s.get("Title", "")),
             "verseCount": count,
-            "verses": count,
             "id": s.get("ID"),
         })
 
@@ -556,8 +527,6 @@ async def preview_file(file: UploadFile = File(...)):
             val = data[key]
             if isinstance(val, str):
                 meta[key] = val
-            elif isinstance(val, dict):
-                meta[key] = json.dumps(val, ensure_ascii=False)
 
     return meta
 
