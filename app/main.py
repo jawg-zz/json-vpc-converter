@@ -637,7 +637,7 @@ async def preview_file(file: UploadFile = File(...)):
                 names = zf.namelist()
                 if not names:
                     raise HTTPException(400, "VPC file is empty")
-                vpc_text = zf.read(names[0]).decode("utf-8")
+                vpc_text = zf.read(names[0]).decode("utf-8-sig")
             data = vpc_to_json(vpc_text)
         else:
             data = json.loads(content)
@@ -736,7 +736,7 @@ async def convert_to_json(file: UploadFile = File(...), selected: str = Form("")
             names = zf.namelist()
             if not names:
                 raise HTTPException(400, "VPC file is empty")
-            vpc_text = zf.read(names[0]).decode("utf-8")
+            vpc_text = zf.read(names[0]).decode("utf-8-sig")
     except HTTPException:
         raise
     except Exception as e:
@@ -782,7 +782,7 @@ async def export_text(file: UploadFile = File(...), selected: str = Form("")):
                 names = zf.namelist()
                 if not names:
                     raise HTTPException(400, "VPC file is empty")
-                vpc_text = zf.read(names[0]).decode("utf-8")
+                vpc_text = zf.read(names[0]).decode("utf-8-sig")
             data = vpc_to_json(vpc_text)
         else:
             data = json.loads(content)
