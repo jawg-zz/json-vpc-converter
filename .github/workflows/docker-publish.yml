@@ -59,16 +59,24 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Dokploy deploy
+        # Skip cleanly when Dokploy secrets are not configured; build+push still succeeds.
+        if: ${{ secrets.DOKPLOY_URL != '' && secrets.DOKPLOY_APPLICATION_ID != '' }}
         env:
           DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
           DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
           DOKPLOY_APPLICATION_ID: ${{ secrets.DOKPLOY_APPLICATION_ID }}
         run: |
           set -euo pipefail
-          payload=$(jq -cn --arg id "$DOKPLOY_APPLICATION_ID" '{applicationId:$id}')
+          if [ -z "${DOKPLOY_URL:-}" ] || [ -z "${DOKPLOY_API_KEY:-}" ] || [ -z "${DOKPLOY_APPLICATION_ID:-}" ]; then
+            echo "::warning::Dokploy secrets incomplete; skipping deploy trigger."
+            exit 0
+          fi
+          # Dokploy exposes a tRPC API: POST /api/trpc/<router.procedure> with a {json:...} envelope
+          # (see @dokploy/cli: apiPost("application.deploy") -> POST /api/trpc/application.deploy {json: data}).
+          payload=$(jq -cn --arg id "$DOKPLOY_APPLICATION_ID" '{json:{applicationId:$id}}')
           status=$(curl -fsS --max-time 30 \
             -o /dev/null -w "%{http_code}" \
-            -X POST "${DOKPLOY_URL%/}/api/application.deploy" \
+            -X POST "${DOKPLOY_URL%/}/api/trpc/application.deploy" \
             -H "x-api-key: ${DOKPLOY_API_KEY}" \
             -H "Content-Type: application/json" \
             --data "$payload")
