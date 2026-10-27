@@ -318,23 +318,40 @@ function updateSelCount() {
 }
 
 /* ── Direction toggle ─────────────────────── */
+function setDirection(dir, opts = {}) {
+  currentDirection = dir;
+  document.querySelectorAll('#dirTabs button').forEach(b => b.classList.toggle('active', b.dataset.dir === dir));
+  const hint = document.getElementById('fileHint');
+  const input = document.getElementById('fileInput');
+  if (dir === 'json2vpc') {
+    hint.textContent = '.json files (songbook format)';
+    input.accept = '.json,.vpc';
+  } else {
+    hint.textContent = '.vpc files (compressed songbook)';
+    input.accept = '.json,.vpc';
+  }
+  if (!opts.keepPreview) clearPreview();
+}
 document.querySelectorAll('#dirTabs button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#dirTabs button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentDirection = btn.dataset.dir;
-    const hint = document.getElementById('fileHint');
-    const input = document.getElementById('fileInput');
-    if (currentDirection === 'json2vpc') {
-      hint.textContent = '.json files (songbook format)';
-      input.accept = '.json';
-    } else {
-      hint.textContent = '.vpc files (compressed songbook)';
-      input.accept = '.vpc';
-    }
-    clearPreview();
-  });
+  btn.addEventListener('click', () => setDirection(btn.dataset.dir));
 });
+
+/* Auto-detect direction by file extension: .vpc → VPC→JSON, .json → JSON→VPC. */
+function autodetectDirection(file) {
+  const m = file.name.match(/\.(json|vpc)$/i);
+  const ext = m ? m[1].toLowerCase() : '';
+  if (ext === 'vpc' && currentDirection !== 'vpc2json') {
+    setDirection('vpc2json');
+    flash('🔄 Auto-switched to VPC → JSON (.vpc file detected)', false);
+  } else if (ext === 'json' && currentDirection !== 'json2vpc') {
+    setDirection('json2vpc');
+    flash('🔄 Auto-switched to JSON → VPC (.json file detected)', false);
+  } else if (!ext) {
+    flash('Wrong file type for this direction: expected a .json or .vpc file', true);
+    return false;
+  }
+  return true;
+}
 
 /* ── Drop zone ────────────────────────────── */
 const dropZone = document.getElementById('dropZone');
@@ -351,6 +368,7 @@ dropZone.addEventListener('click', e => { if (e.target.tagName !== 'INPUT') file
 fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
 
 function handleFile(file) {
+  if (!autodetectDirection(file)) return;
   currentFile = file;
   dropZone.classList.add('has-file');
   document.getElementById('fileIcon').textContent = file.name.match(/\.(json|vpc)$/i)?.[1] === 'vpc' ? '🗜️' : '📄';
@@ -617,6 +635,60 @@ function convert() {
 </body>
 </html>"""
 
+def _vpc_entry_name(zf: zipfile.ZipFile) -> str:
+    """Pick first *.json entry, skipping dirs + __MACOSX metadata."""
+    for info in zf.infolist():
+        name = info.filename
+        if info.is_dir() or not name or name.endswith("/"):
+            continue
+        if name.startswith("__MACOSX/") or "/__MACOSX/" in name:
+            continue
+        if name.lower().endswith(".json"):
+            return name
+    raise HTTPException(400, "Invalid VPC: no .json entry found in archive")
+
+
+def _read_vpc_text(content: bytes) -> str:
+    """Extract VPC payload text: first *.json entry, utf-8-sig decoded."""
+    bio = io.BytesIO(content)
+    if not zipfile.is_zipfile(bio):
+        raise HTTPException(400, "Invalid VPC: not a ZIP archive")
+    try:
+        with zipfile.ZipFile(bio, "r") as zf:
+            entry = _vpc_entry_name(zf)
+            try:
+                raw = zf.read(entry)
+            except Exception as e:
+                raise HTTPException(400, f"Invalid VPC: cannot read entry {entry!r}: {e}")
+            try:
+                return raw.decode("utf-8-sig")
+            except UnicodeDecodeError as e:
+                raise HTTPException(400, f"Invalid VPC: entry is not valid UTF-8: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Invalid VPC: {e}")
+
+
+def _parse_vpc_bytes(content: bytes) -> dict:
+    text = _read_vpc_text(content)
+    try:
+        return vpc_to_json(text)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid VPC: {e}")
+
+
+def _parse_json_bytes(content: bytes) -> dict:
+    try:
+        text = bytes(content).decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON: {e}")
+    text = text.lstrip("\ufeff")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise HTTPException(400, f"Invalid JSON: {e}")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -629,24 +701,10 @@ async def preview_file(file: UploadFile = File(...)):
     name = file.filename or ""
     is_vpc = name.lower().endswith(".vpc")
 
-    try:
-        if is_vpc:
-            if not zipfile.is_zipfile(io.BytesIO(content)):
-                raise HTTPException(400, "Invalid VPC file (not a ZIP archive)")
-            with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
-                names = zf.namelist()
-                if not names:
-                    raise HTTPException(400, "VPC file is empty")
-                vpc_text = zf.read(names[0]).decode("utf-8-sig")
-            data = vpc_to_json(vpc_text)
-        else:
-            data = json.loads(content)
-    except HTTPException:
-        raise
-    except json.JSONDecodeError as e:
-        raise HTTPException(400, f"Invalid JSON: {e}")
-    except Exception as e:
-        raise HTTPException(400, f"Cannot parse file: {e}")
+    if is_vpc:
+        data = _parse_vpc_bytes(content)
+    else:
+        data = _parse_json_bytes(content)
 
     songs = data.get("Songs", [])
     song_list = []
@@ -687,13 +745,10 @@ async def preview_file(file: UploadFile = File(...)):
 @app.post("/convert")
 async def convert_to_vpc(file: UploadFile = File(...), selected: str = Form("")):
     if not file.filename or not file.filename.lower().endswith(".json"):
-        raise HTTPException(400, "Please upload a .json file")
+        raise HTTPException(400, "Wrong file type for this direction: expected a .json file (JSON → VPC mode)")
 
     content = await file.read()
-    try:
-        data = json.loads(content)
-    except Exception as e:
-        raise HTTPException(400, f"Invalid JSON: {e}")
+    data = _parse_json_bytes(content)
 
     # Apply selection filter
     if selected:
@@ -726,26 +781,11 @@ async def convert_to_vpc(file: UploadFile = File(...), selected: str = Form(""))
 @app.post("/reverse")
 async def convert_to_json(file: UploadFile = File(...), selected: str = Form("")):
     if not file.filename or not file.filename.lower().endswith(".vpc"):
-        raise HTTPException(400, "Please upload a .vpc file")
+        raise HTTPException(400, "Wrong file type for this direction: expected a .vpc file (VPC → JSON mode)")
 
     content = await file.read()
-    try:
-        if not zipfile.is_zipfile(io.BytesIO(content)):
-            raise HTTPException(400, "Invalid VPC file (not a ZIP archive)")
-        with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
-            names = zf.namelist()
-            if not names:
-                raise HTTPException(400, "VPC file is empty")
-            vpc_text = zf.read(names[0]).decode("utf-8-sig")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, f"Cannot read VPC file: {e}")
+    data = _parse_vpc_bytes(content)
 
-    try:
-        data = vpc_to_json(vpc_text)
-    except Exception as e:
-        raise HTTPException(500, f"VPC parsing failed: {e}")
 
     # Apply selection filter
     if selected:
@@ -774,24 +814,10 @@ async def export_text(file: UploadFile = File(...), selected: str = Form("")):
     name = file.filename or ""
     is_vpc = name.lower().endswith(".vpc")
 
-    try:
-        if is_vpc:
-            if not zipfile.is_zipfile(io.BytesIO(content)):
-                raise HTTPException(400, "Invalid VPC file (not a ZIP archive)")
-            with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
-                names = zf.namelist()
-                if not names:
-                    raise HTTPException(400, "VPC file is empty")
-                vpc_text = zf.read(names[0]).decode("utf-8-sig")
-            data = vpc_to_json(vpc_text)
-        else:
-            data = json.loads(content)
-    except HTTPException:
-        raise
-    except json.JSONDecodeError as e:
-        raise HTTPException(400, f"Invalid JSON: {e}")
-    except Exception as e:
-        raise HTTPException(400, f"Cannot parse file: {e}")
+    if is_vpc:
+        data = _parse_vpc_bytes(content)
+    else:
+        data = _parse_json_bytes(content)
 
     text_title = data.get("Text", data.get("Description", "Songbook"))
     author = data.get("Author", "")
